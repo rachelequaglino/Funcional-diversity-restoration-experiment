@@ -1,0 +1,470 @@
+---
+title: "Canopy cover 2025"
+author: "Rachele Quaglino"
+date: "8/17/2025"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Load Packages, echo=FALSE}
+library(dplyr)
+library(ggplot2)
+library(lme4)
+library(lmerTest)
+library(ineq)
+library(performance)
+library(emmeans)
+library(tidyr)
+library(readxl)
+library(glmmTMB)   # For beta regression with mixed effects
+library(car)       # For Type III ANOVA
+library(DHARMa)
+```
+
+```{r get data}
+CanopyCover <- read_excel("~/Desktop/Master/3. master thesis/Data/2026/FDiv_PlantedTreeData_final_excel.xlsx", sheet = "CanopyCover")
+
+View(CanopyCover)     
+
+#Reorder treatments
+CanopyCover$Treatment <- factor(CanopyCover$Treatment, levels = c("C", "M1", "M2", "2sp", "6sp", "12sp"))
+```
+
+
+```{r Summary year 3, echo = FALSE}
+CanopyCover3 <- CanopyCover %>% 
+  filter(Year == "3")
+
+CanopyCover_summary<-CanopyCover3 %>%
+  group_by(Site, Treatment, `Plot identification`) %>%
+  summarise(
+    Plot_Canopy_Cover = mean(Percent_canopy_cover, na.rm = TRUE),
+    SD_Canopy_Cover = sd(Percent_canopy_cover, na.rm = TRUE),
+    n = n()
+  )
+
+
+CanopyCover_summary_avg<- CanopyCover_summary %>% 
+  group_by(Site, Treatment)%>%
+  summarise(
+   mean_canopy = mean(Plot_Canopy_Cover, na.rm = TRUE),
+   sd_canopy = sd(Plot_Canopy_Cover, na.rm = TRUE),
+  )
+
+```
+
+```{r Model canopy cover year 3}
+# Fit the linear mixed-effects model
+canopy_model <- lmer(Plot_Canopy_Cover ~ Treatment * Site + (1 | Site/`Plot identification`), data =CanopyCover_summary)
+
+summary(canopy_model)
+
+Anova(canopy_model, type=3)
+# Check model fit by plotting residuals
+simulationOutput <- simulateResiduals(fittedModel = canopy_model, plot = TRUE)
+plot(simulationOutput)
+# Extra diagnostic tests
+testDispersion(simulationOutput)     # Over dispersion check
+testZeroInflation(simulationOutput)  # Zero-inflation check
+
+
+#calculate significant differences
+anova(canopy_model, type = "III")
+#extract model means
+means_canopy <- emmeans (canopy_model, pairwise ~ Treatment | Site , type = "response", data = CanopyCover_summary)
+
+cld_sign_canopy <- as.data.frame(cld(means_canopy, Letters = letters, adjust = "Tukey", alpha = 0.05, decreasing = TRUE))
+```
+
+
+```{r Plot canopy cover year 3}
+canopybar<-ggplot(CanopyCover_summary_avg, aes(x = Treatment, y = mean_canopy , fill=Treatment)) +
+  geom_bar(stat = "identity") +
+  geom_jitter(data = CanopyCover_summary, 
+              aes(x = Treatment, y = Plot_Canopy_Cover), 
+              width = 0.2,  # Horizontal scatter
+              size = 1.5,  # Point size
+              alpha = 0.5, # Transparency
+              color = "black") + # Point color
+   geom_errorbar(aes(ymin = pmax(mean_canopy - sd_canopy, 0), ymax = mean_canopy +                sd_canopy), width = 0.2,    # Width of horizontal caps
+               linetype = "dashed", # Dashed whisker lines
+               size = 0.5) +
+  geom_text(data = cld_sign_canopy, family= "sans", show.legend = FALSE,
+            check_overlap = FALSE, size = 3, vjust = 1,
+            aes(x=Treatment,y=Inf,label=.group ))+
+  scale_fill_manual(values = c( "12sp" = "darkblue",
+                               "2sp" = "deepskyblue", 
+                               "6sp" = "deepskyblue4", 
+                               "M1" = "firebrick", 
+                               "M2"= "coral"), guide = "none") +
+  facet_wrap(~ Site) +  # Creates a separate panel for each site
+  labs(
+       x = "Treatment",
+       y = "Mean Canopy Cover (%)") +
+  theme(legend.position = "none")+
+  theme_classic()
+
+#save plot
+ggsave("~/Desktop/canopy_barplot_year_3.jpeg", plot=canopybar, width = 8, height = 5, dpi = 300)
+ggsave("~/Desktop/canopy_barplot_year_3.svg", plot=canopybar)
+```
+
+```{r Plot canopy cover year 3 - pooled}
+CanopyCover_avg_pooled<-CanopyCover3 %>%
+  group_by(Treatment) %>%
+  summarise(
+    mean_canopy = mean(Percent_canopy_cover, na.rm = TRUE),
+    sd_canopy = sd(Percent_canopy_cover, na.rm = TRUE),
+    n = n()
+  )
+
+CanopyCover_summary_pooled<-CanopyCover3 %>%
+  group_by(Treatment, `Plot identification`) %>%
+  summarise(
+    Plot_Canopy_Cover = mean(Percent_canopy_cover, na.rm = TRUE),
+    SD_Canopy_Cover = sd(Percent_canopy_cover, na.rm = TRUE),
+    n = n()
+  )
+
+
+means_canopy_pooled <- emmeans (canopy_model, pairwise ~ Treatment, type = "response", data = CanopyCover_summary)
+
+cld_sign_canopy_pooled <- as.data.frame(cld(means_canopy_pooled, Letters = letters, adjust = "Tukey", alpha = 0.05, decreasing = TRUE))
+
+# If you want a data frame:
+cld_sign_canopy_pooled <- as.data.frame(cld_sign_canopy_pooled)
+
+canopybar_pooled<-ggplot(CanopyCover_avg_pooled, aes(x = Treatment, y = mean_canopy , fill=Treatment)) +
+  geom_bar(stat = "identity") +
+  geom_jitter(data = CanopyCover_summary_pooled, 
+              aes(x = Treatment, y = Plot_Canopy_Cover), 
+              width = 0.2,  # Horizontal scatter
+              size = 1.5,  # Point size
+              alpha = 0.5, # Transparency
+              color = "black") + # Point color
+   geom_errorbar(aes(ymin = pmax(mean_canopy - sd_canopy, 0), ymax = mean_canopy +                sd_canopy), width = 0.2,    # Width of horizontal caps
+               linetype = "dashed", # Dashed whisker lines
+               size = 0.5) +
+  geom_text(data = cld_sign_canopy_pooled, family= "sans", show.legend = FALSE,
+            check_overlap = FALSE, size = 3, vjust = 1,
+            aes(x=Treatment,y=Inf,label=.group ))+
+  scale_fill_manual(values = c( "12sp" = "darkblue",
+                               "2sp" = "deepskyblue", 
+                               "6sp" = "deepskyblue4", 
+                               "M1" = "firebrick", 
+                               "M2"= "coral"), guide = "none") +
+  labs(
+       x = "Treatment",
+       y = "Mean Canopy Cover (%)") +
+  theme(legend.position = "none")+
+  theme_classic()
+
+#save plot
+ggsave("~/Desktop/canopyyear3_pooled.jpeg", plot=canopybar_pooled, width = 8, height = 5, dpi = 300)
+ggsave("~/Desktop/canopyyear3_pooled.svg", plot=canopybar_pooled)
+```
+
+```{r Gini canopy cover and model}
+gini_canopy_cover <- CanopyCover %>%  
+  filter(Year == "3") %>% 
+  group_by(Site, Treatment, `Plot identification`) %>%
+  summarize(
+    Gini_Canopy = ineq(Percent_canopy_cover, type = "Gini")) 
+ 
+gini_canopy_summary <- gini_canopy_cover %>%
+  group_by(Site, Treatment) %>%
+  summarize(mean_gini = mean(Gini_Canopy, na.rm = TRUE),
+            sd_gini = sd(Gini_Canopy, na.rm = TRUE),
+  )  
+
+# Fit the linear mixed-effects model
+gini_model_canopy <- lmer(Gini_Canopy ~ Treatment * Site + (1 |`Plot identification`), data = gini_canopy_cover)
+
+summary(canopy_model)
+
+# Check model fit by plotting residuals
+simulationOutput <- simulateResiduals(fittedModel = canopy_model, plot = TRUE)
+plot(simulationOutput)
+# Extra diagnostic tests
+testDispersion(simulationOutput)     # Over dispersion check
+testZeroInflation(simulationOutput)  # Zero-inflation check
+
+#calculate significant differences
+anova(gini_model_canopy, type = "III")
+#extract model means
+means_gini <- emmeans (gini_model_canopy, pairwise ~ Treatment | Site , type = "response", data = gini_canopy_cover)
+
+cld_sign_gini <- as.data.frame(cld(means_gini, Letters = letters, adjust = "Tukey", alpha = 0.05, decreasing = TRUE))
+
+
+ginicanopybar <- ggplot(gini_canopy_summary, aes(x = Treatment, y = mean_gini , fill=Treatment)) +
+  geom_bar(stat = "identity") +
+  geom_jitter(data = gini_canopy_cover, 
+              aes(x = Treatment, y = Gini_Canopy), 
+              width = 0.2,  # Horizontal scatter
+              size = 1.5,  # Point size
+              alpha = 0.5, # Transparency
+              color = "black") + # Point color
+   geom_errorbar(aes(ymin = pmax(mean_gini - sd_gini, 0), ymax = mean_gini +                sd_gini), width = 0.2,    # Width of horizontal caps
+               linetype = "dashed", # Dashed whisker lines
+               size = 0.5) +
+  geom_text(data = cld_sign_gini, family= "sans", show.legend = FALSE,
+            check_overlap = FALSE, size = 3, vjust = 1,
+            aes(x=Treatment,y=Inf,label=.group ))+
+  scale_fill_manual(values = c( "12sp" = "darkblue",
+                               "2sp" = "deepskyblue", 
+                               "6sp" = "deepskyblue4", 
+                               "M1" = "firebrick", 
+                               "M2"= "coral"), guide = "none") +
+  facet_wrap(~ Site) +  # Creates a separate panel for each site
+  labs(
+       x = "Treatment",
+       y = "Mean Canopy Cover (%)") +
+  theme(legend.position = "none")+
+  theme_classic()
+
+#save plot
+ggsave("~/Desktop/ginicanopyyear3.jpeg", plot=ginicanopybar, width = 8, height = 5, dpi = 800)
+ggsave("~/Desktop/ginicanopyyear3.svg", plot=ginicanopybar)
+```  
+
+```{r Time Series}
+library(ggplot2)
+library(dplyr)
+#Filter data for year 3
+CanopyCover_LLFS<- CanopyCover %>%
+  filter(Site == "LLFS")
+CanopyCover_other_sites <- CanopyCover %>%
+  filter(Site != "LLFS")
+
+CanopyCover_LLFS <- CanopyCover_LLFS %>%
+  mutate(Year = as.character(Year)) %>%
+  mutate(Year = ifelse(Year == "2023", "Year 2", Year)) %>% 
+  mutate(Year = ifelse(Year == "2024", "Year 3", Year))
+
+CanopyCover_other_sites <- CanopyCover_other_sites %>%
+  mutate(Year = as.character(Year)) %>%
+  mutate(Year = ifelse(Year == "2023", "Year 1", Year)) %>% 
+  mutate(Year = ifelse(Year == "2024", "Year 2", Year)) %>% 
+  mutate(Year = ifelse(Year == "2025", "Year 3", Year))
+
+CanopyCover_time<-bind_rows(CanopyCover_LLFS, CanopyCover_other_sites)
+  
+# Ensure Year is a factor so it appears correctly on the x-axis
+CanopyCover_time<- CanopyCover_time %>%
+  mutate(Year = factor(Year, levels = c("Year 1", "Year 2","Year 3")))
+
+#Summarise for the means
+CanopyCover_time_summary<-CanopyCover_time %>%
+  group_by(Site, Treatment, `Plot identification`, Year) %>%
+  summarise(
+    Plot_Canopy_Cover = mean(Percent_canopy_cover, na.rm = TRUE),
+    SD_Canopy_Cover = sd(Percent_canopy_cover, na.rm = TRUE),
+    n = n()
+  )
+
+#model
+library(lme4)
+
+# Fit the linear mixed-effects model
+canopy_model <- lmer(Plot_Canopy_Cover ~ Treatment * Site * Year + (1 | `Plot identification`), data =CanopyCover_time_summary)
+summary(canopy_model)
+plot(canopy_model)
+library(emmeans)
+library(multcomp)
+
+#calculate significant differences
+anova(canopy_model, type = "III")
+#extract model means
+means_canopy <- emmeans (canopy_model, pairwise ~ Treatment * Site|Year , type = "response", data = CanopyCover_time_summary)
+
+library(multcomp)
+cld_sign_canopy <- as.data.frame(cld(means_canopy, Letters = letters, adjust = "Tukey", alpha = 0.05, decreasing = TRUE))
+
+canopy_summary_time <- CanopyCover_time_summary %>%
+  group_by(Site, Treatment, Year) %>%
+  summarize(Plot_Canopy_Cover = mean(Plot_Canopy_Cover, na.rm = TRUE),
+            SD_Canopy_Cover = sd(Plot_Canopy_Cover, na.rm = TRUE),
+  )  
+#Plot FAB
+canopy_summary_time_FAB<-canopy_summary_time %>% 
+ filter(Site == "FAB", Year != "Year 1")
+canopy_FAB<-ggplot(canopy_summary_time_FAB, aes(x = Year, y = Plot_Canopy_Cover, 
+                                     group = Treatment, color = Treatment)) +
+  geom_line(size = 1.2) +  # Line thickness
+  geom_point(size = 5) +   # Large points
+  scale_color_manual(values = c("12sp" = "darkblue",
+                                "2sp" = "deepskyblue", 
+                                "6sp" = "deepskyblue4", 
+                                "M1" = "firebrick", 
+                                "M2" = "coral",
+                                "C" = "darkgrey")) +
+  ylim(0, 100) +  # Fixes y-axis from 0 to 100
+  labs(x = "Years after Planting",
+       y = "Mean Canopy Cover (%)",
+       color = "Treatment") +  # Legend title
+  theme_minimal() + 
+  theme(legend.position = "none")+
+  theme(axis.text = element_text(size = 11),  # Bigger axis labels
+        axis.title = element_text(size = 12))
+#save plot
+ggsave("~/Desktop/canopy_FAB.jpeg", plot=canopy_FAB, width = 4, height = 5, dpi = 300)
+
+#Plot FCEA
+canopy_summary_time_FCEA<-canopy_summary_time %>% 
+ filter(Site == "FCEA", Year !="Year 1")
+
+canopy_FCEA<-ggplot(canopy_summary_time_FCEA, aes(x = Year, y = Plot_Canopy_Cover, 
+                                     group = Treatment, color = Treatment)) +
+  geom_line(size = 1.2) +  # Line thickness
+  geom_point(size = 5) +   # Large points
+  scale_color_manual(values = c("12sp" = "darkblue",
+                                "2sp" = "deepskyblue", 
+                                "6sp" = "deepskyblue4", 
+                                "M1" = "firebrick", 
+                                "M2" = "coral",
+                                "C" = "darkgrey")) +
+  ylim(0, 100) +  # Fixes y-axis from 0 to 100
+  labs(x = "Years after Planting",
+       y = "Mean Canopy Cover (%)",
+       color = "Treatment") +  # Legend title
+  theme_minimal() + 
+  theme(legend.position = "none")+
+  theme(axis.text = element_text(size = 11),  # Bigger axis labels
+        axis.title = element_text(size = 12))
+#save plot
+ggsave("~/Desktop/canopy_FCEA.jpeg", plot=canopy_FCEA, width = 4, height = 5, dpi = 300)
+
+#Plot LLFS now
+canopy_summary_time_LLFS<-canopy_summary_time %>% 
+ filter(Site == "LLFS")
+
+canopy_LLFS<-ggplot(canopy_summary_time_LLFS, aes(x = Year, y = Plot_Canopy_Cover, 
+                                     group = Treatment, color = Treatment)) +
+  geom_line(size = 1.2) +  # Line thickness
+  geom_point(size = 5) +   # Large points
+  scale_color_manual(values = c("12sp" = "darkblue",
+                                "2sp" = "deepskyblue", 
+                                "6sp" = "deepskyblue4", 
+                                "M1" = "firebrick", 
+                                "M2" = "coral",
+                                "C" = "darkgrey"),
+                     labels = c("12sp" = "12-species plots",
+                                "2sp" = "2-species plots", 
+                                "6sp" = "6-species plots", 
+                                "M1" = "N-fixer monocultures (1)", 
+                                "M2" = "Fleshy fruit monocultures (2)",
+                                "C" = "Control")) +
+  ylim(0, 100) +  # Fixes y-axis from 0 to 100
+  labs(x = "Years after Planting",
+       y = "Mean Canopy Cover (%)",
+       color = "Treatment") +  # Legend title
+  theme_minimal() + 
+  theme(axis.text = element_text(size = 12),  # Bigger axis labels
+        axis.title = element_text(size = 12),
+        legend.title = element_text(size = 12),
+        legend.text = element_text(size = 10))
+#save plot
+ggsave("~/Desktop/canopy_LLFS.jpeg", plot=canopy_LLFS, width = 6, height = 5, dpi = 300)
+```
+
+```{r Gini time series}
+gini_canopy_cover_time <- CanopyCover_time %>%  
+  group_by(Site, Treatment, `Plot identification`, Year) %>%
+  summarize(
+    Gini_Canopy = ineq(Percent_canopy_cover, type = "Gini")) 
+ 
+gini_canopy_summary_time <- gini_canopy_cover_time %>%
+  group_by(Site, Treatment, Year) %>%
+  summarize(mean_gini = mean(Gini_Canopy, na.rm = TRUE),
+            sd_gini = sd(Gini_Canopy, na.rm = TRUE),
+  )  
+
+# Ensure Year is a factor (categorical) to avoid empty spaces in the x-axis
+gini_canopy_summary_time$Year <- factor(gini_canopy_summary_time$Year)
+gini_canopy_summary_time$Year <- as.character(gini_canopy_summary_time$Year)
+
+#Plot FAB
+gini_canopy_summary_time_FAB<-gini_canopy_summary_time %>% 
+ filter(Site == "FAB", Year != "Year 1")
+ginicanopy_FAB<-ggplot(gini_canopy_summary_time_FAB, aes(x = Year, y = mean_gini, 
+                                     group = Treatment, color = Treatment)) +
+  geom_line(size = 1.2) +  # Line thickness
+  geom_point(size = 5) +   # Large points
+  scale_color_manual(values = c("12sp" = "darkblue",
+                                "2sp" = "deepskyblue", 
+                                "6sp" = "deepskyblue4", 
+                                "M1" = "firebrick", 
+                                "M2" = "coral",
+                                "C" = "darkgrey")) +
+  ylim(0, 1) +  # Fixes y-axis from 0 to 1
+  labs(x = "Years after Planting",
+       y = "Mean Gini Coefficient of Canopy Cover",
+       color = "Treatment") +  # Legend title
+  theme_minimal() + 
+  theme(legend.position = "none")+
+  theme(axis.text = element_text(size = 11),  # Bigger axis labels
+        axis.title = element_text(size = 12),
+        axis.title.y = element_text(margin = margin(r = 15)))
+#save plot
+ggsave("~/Desktop/ginicanopy_FAB.jpeg", plot=ginicanopy_FAB, width = 4, height = 5, dpi = 300)
+
+#Plot FAB
+gini_canopy_summary_time_FCEA<-gini_canopy_summary_time %>% 
+ filter(Site == "FCEA", Year != "Year 1")
+ginicanopy_FCEA<-ggplot(gini_canopy_summary_time_FCEA, aes(x = Year, y = mean_gini, 
+                                     group = Treatment, color = Treatment)) +
+  geom_line(size = 1.2) +  # Line thickness
+  geom_point(size = 5) +   # Large points
+  scale_color_manual(values = c("12sp" = "darkblue",
+                                "2sp" = "deepskyblue", 
+                                "6sp" = "deepskyblue4", 
+                                "M1" = "firebrick", 
+                                "M2" = "coral",
+                                "C" = "darkgrey")) +
+  ylim(0, 1) +  # Fixes y-axis from 0 to 1
+  labs(x = "Years after Planting",
+       y = "Mean Gini Coefficient of Canopy Cover",
+       color = "Treatment") +  # Legend title
+  theme_minimal() + 
+  theme(legend.position = "none")+
+  theme(axis.text = element_text(size = 11),  # Bigger axis labels
+        axis.title = element_text(size = 12))
+#save plot
+ggsave("~/Desktop/ginicanopy_FCEA.jpeg", plot=ginicanopy_FCEA, width = 4, height = 5, dpi = 300)
+
+#Plot LLFS now
+gini_canopy_summary_time_LLFS<-gini_canopy_summary_time %>% 
+ filter(Site == "LLFS")
+
+ginicanopy_LLFS<-ggplot(gini_canopy_summary_time_LLFS, aes(x = Year, y = mean_gini, 
+                                     group = Treatment, color = Treatment)) +
+  geom_line(size = 1.2) +  # Line thickness
+  geom_point(size = 5) +   # Large points
+  scale_color_manual(values = c("12sp" = "darkblue",
+                                "2sp" = "deepskyblue", 
+                                "6sp" = "deepskyblue4", 
+                                "M1" = "firebrick", 
+                                "M2" = "coral",
+                                "C" = "darkgrey"),
+                     labels = c("12sp" = "12-species plots",
+                                "2sp" = "2-species plots", 
+                                "6sp" = "6-species plots", 
+                                "M1" = "N-fixer monocultures (1)", 
+                                "M2" = "Fleshy fruit monocultures (2)",
+                                "C" = "Control")) +
+  ylim(0, 1) +  # Fixes y-axis from 0 to 1
+  labs(x = "Years after Planting",
+       y = "Mean Gini Coefficient of Canopy Cover",
+       color = "Treatment") +  # Legend title
+  theme_minimal() + 
+  theme(axis.text = element_text(size = 12),  # Bigger axis labels
+        axis.title = element_text(size = 12),
+        legend.title = element_text(size = 12),
+        legend.text = element_text(size = 10))
+#save plot
+ggsave("~/Desktop/ginicanopy_LLFS.jpeg", plot=ginicanopy_LLFS, width = 6, height = 5, dpi = 300)
+```
