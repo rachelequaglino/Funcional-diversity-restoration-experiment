@@ -41,8 +41,10 @@ gini_results_3$Treatment<- factor(gini_results_3$Treatment, levels = c("M1", "M2
 gini_summary_3 <- gini_results_3 %>%
   group_by(Site, Treatment) %>%
   summarize(mean_gini = mean(Gini_Coefficient_year_3, na.rm = TRUE),
-            sd_gini = sd(Gini_Coefficient_year_3, na.rm = TRUE),
-  )
+    sd_gini   = sd(Gini_Coefficient_year_3, na.rm = TRUE),
+    n         = sum(!is.na(Gini_Coefficient_year_3)),
+    se_gini   = sd_gini / sqrt(n),
+    ci_gini   = qt(0.975, df = n - 1) * se_gini)
 
 ```
 
@@ -52,8 +54,8 @@ library(lme4)
 # Fit the linear mixed-effects model
 gini_model_3 <- lmer(Gini_Coefficient_year_3 ~ Treatment * Site + (1 | Site), data = gini_results_3)
 plot(gini_model_3)
-summary(mod3)
-Anova(mod3, type=3)
+
+Anova(gini_model_3, type=3)
 # Check model fit by plotting residuals
 simulationOutput3 <- simulateResiduals(fittedModel = gini_model_3, plot = TRUE)
 plot(simulationOutput3)
@@ -84,16 +86,17 @@ cld_sign_gini_3 <- as.data.frame(cld_sign_gini_3)
 
 
 ginibar3<-ggplot(gini_summary_3, aes(x = Treatment, y = mean_gini, fill=Treatment)) +
-  geom_bar(stat = "identity") +
+  geom_bar(stat = "identity", color = "black") +
   geom_jitter(data = gini_results_3, 
               aes(x = Treatment, y = Gini_Coefficient_year_3), 
               width = 0.2,  # Horizontal scatter
               size = 1.5,  # Point size
               alpha = 0.5, # Transparency
               color = "black") + # Point color
-   geom_errorbar(aes(ymin = mean_gini - sd_gini, ymax = mean_gini +                sd_gini), width = 0.2,    # Width of horizontal caps
-               linetype = "dashed", # Dashed whisker lines
-               size = 0.5) +
+  geom_errorbar(aes(ymin = pmax(mean_gini - ci_gini, 0),
+                  ymax = mean_gini + ci_gini),
+              width = 0.2,
+              size = 0.5)+
   geom_text(data = cld_sign_gini_3, family= "sans", show.legend = FALSE,
             check_overlap = FALSE, size = 3, vjust = 1,
             aes(x=Treatment,y=Inf,label=.group ))+
@@ -119,8 +122,14 @@ ggsave("~/Desktop/gini_barplot_year_3.svg", plot=ginibar3)
 gini_summary_3_pooled <- gini_results_3 %>%
   group_by(Treatment) %>%
   summarize(mean_gini = mean(Gini_Coefficient_year_3, na.rm = TRUE),
-            sd_gini = sd(Gini_Coefficient_year_3, na.rm = TRUE),
+    sd_gini   = sd(Gini_Coefficient_year_3, na.rm = TRUE),
+    n         = sum(!is.na(Gini_Coefficient_year_3)),
+    se_gini   = sd_gini / sqrt(n),
+    ci_gini   = qt(0.975, df = n - 1) * se_gini
   )
+
+# model
+gini_model_3 <- lmer(Gini_Coefficient_year_3 ~ Treatment + (1 | Site), data = gini_results_3)
 
 # Get both emmeans and pairwise comparisons
 means_gini_3_pooled <- emmeans(gini_model_3, pairwise ~ Treatment,
@@ -140,18 +149,17 @@ cld_sign_gini_3_pooled <- as.data.frame(cld_sign_gini_3_pooled)
 
 ginibar3_pooled <- ggplot(gini_summary_3_pooled,
                           aes(x = Treatment, y = mean_gini, fill = Treatment)) +
-  geom_bar(stat = "identity") +
+  geom_bar(stat = "identity", color = "black") +
   geom_jitter(data = gini_results_3,
               aes(x = Treatment, y = Gini_Coefficient_year_3),
               width = 0.2,
               size = 1.5,
               alpha = 0.5,
               color = "black") +
-  geom_errorbar(aes(ymin = mean_gini - sd_gini,
-                    ymax = mean_gini + sd_gini),
-                width = 0.2,
-                linetype = "dashed",
-                size = 0.5) +
+  geom_errorbar(aes(ymin = pmax(mean_gini - ci_gini, 0),
+                  ymax = mean_gini + ci_gini),
+              width = 0.2,
+              size = 0.5)+
   geom_text(data = cld_sign_gini_3_pooled,
             aes(x = Treatment, y = Inf, label = .group),
             vjust = 1,
